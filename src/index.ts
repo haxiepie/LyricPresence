@@ -26,9 +26,25 @@ const client = new Client({
 });
 
 const SPOTIFY_SYNC_INTERVAL_MS = 5_000;
-const PRESENCE_UPDATE_INTERVAL_MS = 1_000;
-const PROGRESS_BAR_LENGTH = 11;
-const LYRIC_OFFSET_MS = 0;
+const PRESENCE_UPDATE_INTERVAL_MS = 250;
+
+/*
+ * Positive values delay the lyric.
+ * Negative values show the lyric earlier.
+ *
+ * Example:
+ * LYRIC_OFFSET_MS=500   -> lyric appears 500 ms later
+ * LYRIC_OFFSET_MS=-500  -> lyric appears 500 ms earlier
+ */
+const LYRIC_OFFSET_MS =
+    Number(process.env.LYRIC_OFFSET_MS ?? "0");
+
+/*
+ * Discord may visually wrap or crop very long lines.
+ * This keeps the lyric neat before it reaches Discord.
+ */
+const MAX_LYRIC_LENGTH =
+    Number(process.env.MAX_LYRIC_LENGTH ?? "92");
 
 interface PlaybackClock {
     playback: CurrentPlayback;
@@ -41,46 +57,6 @@ let currentTrackId: string | null = null;
 let lastPresenceSignature = "";
 let spotifySyncRunning = false;
 let presenceUpdateRunning = false;
-
-function formatTime(milliseconds: number): string {
-    const safeMilliseconds = Math.max(0, milliseconds);
-    const totalSeconds = Math.floor(safeMilliseconds / 1000);
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-
-    return `${minutes}:${seconds
-        .toString()
-        .padStart(2, "0")}`;
-}
-
-function createProgressBar(
-    progressMs: number,
-    durationMs: number
-): string {
-    if (durationMs <= 0) {
-        return `●${"─".repeat(PROGRESS_BAR_LENGTH - 1)}`;
-    }
-
-    const ratio = Math.min(
-        1,
-        Math.max(0, progressMs / durationMs)
-    );
-
-    const position = Math.min(
-        PROGRESS_BAR_LENGTH - 1,
-        Math.max(
-            0,
-            Math.round(
-                ratio * (PROGRESS_BAR_LENGTH - 1)
-            )
-        )
-    );
-
-    return Array.from(
-        { length: PROGRESS_BAR_LENGTH },
-        (_, index) => index === position ? "●" : "─"
-    ).join("");
-}
 
 function getEstimatedProgressMs(): number {
     if (!currentClock) {
@@ -100,6 +76,45 @@ function getEstimatedProgressMs(): number {
     );
 }
 
+function trimLyric(
+    lyric: string,
+    maximumLength = MAX_LYRIC_LENGTH
+): string {
+    const normalized = lyric
+        .replace(/\s+/g, " ")
+        .trim();
+
+    if (
+        maximumLength <= 0 ||
+        normalized.length <= maximumLength
+    ) {
+        return normalized;
+    }
+
+    if (maximumLength <= 3) {
+        return normalized.slice(
+            0,
+            maximumLength
+        );
+    }
+
+    const target =
+        normalized.slice(
+            0,
+            maximumLength - 1
+        );
+
+    const lastSpace =
+        target.lastIndexOf(" ");
+
+    const cleanCut =
+        lastSpace >= Math.floor(maximumLength * 0.65)
+            ? target.slice(0, lastSpace)
+            : target;
+
+    return `${cleanCut.trimEnd()}…`;
+}
+
 async function syncSpotify(): Promise<void> {
     if (spotifySyncRunning) {
         return;
@@ -108,7 +123,8 @@ async function syncSpotify(): Promise<void> {
     spotifySyncRunning = true;
 
     try {
-        const playback = await getCurrentPlayback();
+        const playback =
+            await getCurrentPlayback();
 
         if (!playback) {
             currentClock = null;
@@ -123,8 +139,13 @@ async function syncSpotify(): Promise<void> {
             fetchedAt: Date.now()
         };
 
-        if (playback.trackId !== currentTrackId) {
-            currentTrackId = playback.trackId;
+        if (
+            playback.trackId !==
+            currentTrackId
+        ) {
+            currentTrackId =
+                playback.trackId;
+
             currentLyrics = [];
             lastPresenceSignature = "";
 
@@ -133,12 +154,20 @@ async function syncSpotify(): Promise<void> {
             );
 
             try {
-                currentLyrics = await getSyncedLyrics({
-                    trackName: playback.trackName,
-                    artistName: playback.artistName,
-                    albumName: playback.albumName,
-                    durationMs: playback.durationMs
-                });
+                currentLyrics =
+                    await getSyncedLyrics({
+                        trackName:
+                            playback.trackName,
+
+                        artistName:
+                            playback.artistName,
+
+                        albumName:
+                            playback.albumName,
+
+                        durationMs:
+                            playback.durationMs
+                    });
 
                 console.log(
                     `Loaded ${currentLyrics.length} synced lyric lines.`
@@ -162,25 +191,28 @@ async function syncSpotify(): Promise<void> {
     }
 }
 
-async function setWaitingPresence(): Promise<void> {
-    const signature = "waiting";
-
-    if (signature === lastPresenceSignature) {
+async function setWaitingPresence():
+Promise<void> {
+    if (
+        lastPresenceSignature ===
+        "waiting"
+    ) {
         return;
     }
 
     await client.user?.setActivity({
+        type: 2,
         details: "Waiting for Spotify",
         state: "Nothing is currently playing",
         largeImageKey: "lyricpresence",
-        largeImageText: "LyricPresence",
         instance: false
     });
 
-    lastPresenceSignature = signature;
+    lastPresenceSignature = "waiting";
 }
 
-async function updatePresence(): Promise<void> {
+async function updatePresence():
+Promise<void> {
     if (presenceUpdateRunning) {
         return;
     }
@@ -193,51 +225,53 @@ async function updatePresence(): Promise<void> {
             return;
         }
 
-        const playback = currentClock.playback;
-        const progressMs = getEstimatedProgressMs();
+        const playback =
+            currentClock.playback;
 
-        const currentLyric = getLyricAt(
-            currentLyrics,
-            progressMs - LYRIC_OFFSET_MS
-        );
+        const progressMs =
+            getEstimatedProgressMs();
 
-        const progressBar = createProgressBar(
-            progressMs,
-            playback.durationMs
-        );
-
-        const timeText =
-            `${formatTime(progressMs)} / ` +
-            `${formatTime(playback.durationMs)}`;
+        const rawLyric =
+            getLyricAt(
+                currentLyrics,
+                progressMs -
+                LYRIC_OFFSET_MS
+            );
 
         const details =
-            currentLyric ??
-            (currentLyrics.length === 0
-                ? "No synced lyrics found"
-                : "♪ …");
+            rawLyric
+                ? trimLyric(rawLyric)
+                : currentLyrics.length === 0
+                    ? "No synced lyrics found"
+                    : "♪ …";
 
         const state =
-            `${playback.trackName} — ${playback.artistName} · ` +
-            `${progressBar} ${timeText}`;
+            `${playback.trackName} — ${playback.artistName}`;
 
         const signature = [
             playback.trackId,
             playback.isPlaying,
             details,
-            progressBar
+            state
         ].join("|");
 
-        if (signature === lastPresenceSignature) {
+        if (
+            signature ===
+            lastPresenceSignature
+        ) {
             return;
         }
 
         const playbackStart =
-            Date.now() - progressMs;
+            Date.now() -
+            progressMs;
 
         const playbackEnd =
-            playbackStart + playback.durationMs;
+            playbackStart +
+            playback.durationMs;
 
         await client.user?.setActivity({
+            type: 2,
             details,
             state,
 
@@ -245,8 +279,11 @@ async function updatePresence(): Promise<void> {
                 playback.albumArtUrl ??
                 "lyricpresence",
 
-            largeImageText:
-                `${playback.albumName} — ${playback.artistName}`,
+            /*
+             * Intentionally no largeImageText.
+             * Discord's listening layout was displaying it as an extra
+             * album/artist line under the song.
+             */
 
             startTimestamp:
                 playback.isPlaying
@@ -262,17 +299,23 @@ async function updatePresence(): Promise<void> {
 
             buttons: [
                 {
-                    label: "Open in Spotify",
-                    url: playback.spotifyUrl
+                    label:
+                        "Open in Spotify",
+
+                    url:
+                        playback.spotifyUrl
                 }
             ]
         });
 
-        lastPresenceSignature = signature;
+        lastPresenceSignature =
+            signature;
 
         console.log(
-            `${formatTime(progressMs)} ${details}`
+            `${playback.trackName} — ${playback.artistName}`
         );
+
+        console.log(details);
     } catch (error) {
         console.error(
             "Failed to update Discord presence:",
@@ -286,6 +329,14 @@ async function updatePresence(): Promise<void> {
 client.on("ready", async () => {
     console.log(
         `Connected to Discord as ${client.user?.username}`
+    );
+
+    console.log(
+        `Lyric offset: ${LYRIC_OFFSET_MS} ms`
+    );
+
+    console.log(
+        `Maximum lyric length: ${MAX_LYRIC_LENGTH}`
     );
 
     await syncSpotify();
