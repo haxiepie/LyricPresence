@@ -1,0 +1,53 @@
+# ==========================
+# Dependencies
+# ==========================
+node_modules/
+
+# ==========================
+# Build output
+# ==========================
+dist/
+
+# ==========================
+# Environment variables
+# ==========================
+.env
+
+# ==========================
+# Spotify authentication
+# ==========================
+.spotify-token.json
+
+# ==========================
+# Logs
+# ==========================
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ==========================
+# TypeScript
+# ==========================
+*.tsbuildinfo
+
+# ==========================
+# Operating System
+# ==========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==========================
+# VS Code
+# ==========================
+.vscode/settings.json
+.vscode/*.code-workspace
+
+# ==========================
+# Temporary files
+# ==========================
+tmp/
+temp/
+.cache/
