@@ -1,3 +1,9 @@
+// Entry point for LyricPresence: syncs Spotify playback and updates Discord RPC
+// with the currently playing song and the active lyric line (if available).
+//
+// The file sets up a Discord RPC client, periodically polls Spotify for the
+// current playback state, loads synced lyrics for new tracks, and updates the
+// activity shown in Discord with a trimmed lyric line and playback timestamps.
 import "dotenv/config";
 
 import { Client } from "@xhayper/discord-rpc";
@@ -25,7 +31,10 @@ const client = new Client({
     clientId
 });
 
-const SPOTIFY_SYNC_INTERVAL_MS = 5_000;
+// How often to poll Spotify for the current playback state.
+const SPOTIFY_SYNC_INTERVAL_MS = 1_000;
+
+// How often to update Discord presence (keeps lyrics in sync smoothly).
 const PRESENCE_UPDATE_INTERVAL_MS = 250;
 
 /*
@@ -36,6 +45,8 @@ const PRESENCE_UPDATE_INTERVAL_MS = 250;
  * LYRIC_OFFSET_MS=500   -> lyric appears 500 ms later
  * LYRIC_OFFSET_MS=-500  -> lyric appears 500 ms earlier
  */
+// Global offset applied to lyric timing (ms). Positive delays lyric, negative
+// shows it earlier. Configurable via LYRIC_OFFSET_MS env var.
 const LYRIC_OFFSET_MS =
     Number(process.env.LYRIC_OFFSET_MS ?? "0");
 
@@ -43,20 +54,23 @@ const LYRIC_OFFSET_MS =
  * Discord may visually wrap or crop very long lines.
  * This keeps the lyric neat before it reaches Discord.
  */
+// Maximum length for lyric lines before trimming to avoid Discord truncation.
 const MAX_LYRIC_LENGTH =
     Number(process.env.MAX_LYRIC_LENGTH ?? "92");
 
+// Stores a snapshot of the playback data and the timestamp it was fetched at.
 interface PlaybackClock {
     playback: CurrentPlayback;
     fetchedAt: number;
 }
 
+// Runtime state used across sync/update loops.
 let currentClock: PlaybackClock | null = null;
 let currentLyrics: LyricLine[] = [];
 let currentTrackId: string | null = null;
-let lastPresenceSignature = "";
-let spotifySyncRunning = false;
-let presenceUpdateRunning = false;
+let lastPresenceSignature = ""; // avoids redundant Discord updates
+let spotifySyncRunning = false; // prevents overlapping Spotify fetches
+let presenceUpdateRunning = false; // prevents overlapping presence updates
 
 function getEstimatedProgressMs(): number {
     if (!currentClock) {
@@ -75,6 +89,10 @@ function getEstimatedProgressMs(): number {
         (Date.now() - fetchedAt)
     );
 }
+
+// Returns the estimated playback progress (ms). If the track is playing, the
+// function extrapolates progress based on the time the playback snapshot was
+// fetched; otherwise returns the static progress reported by Spotify.
 
 function trimLyric(
     lyric: string,
@@ -115,6 +133,9 @@ function trimLyric(
     return `${cleanCut.trimEnd()}…`;
 }
 
+// Normalizes and trims a lyric line to a readable length. Tries to cut at a
+// natural word boundary, falling back to a hard cut and appending an ellipsis.
+
 async function syncSpotify(): Promise<void> {
     if (spotifySyncRunning) {
         return;
@@ -123,8 +144,7 @@ async function syncSpotify(): Promise<void> {
     spotifySyncRunning = true;
 
     try {
-        const playback =
-            await getCurrentPlayback();
+        const playback = await getCurrentPlayback();
 
         if (!playback) {
             currentClock = null;
@@ -139,13 +159,8 @@ async function syncSpotify(): Promise<void> {
             fetchedAt: Date.now()
         };
 
-        if (
-            playback.trackId !==
-            currentTrackId
-        ) {
-            currentTrackId =
-                playback.trackId;
-
+        if (playback.trackId !== currentTrackId) {
+            currentTrackId = playback.trackId;
             currentLyrics = [];
             lastPresenceSignature = "";
 
@@ -154,49 +169,33 @@ async function syncSpotify(): Promise<void> {
             );
 
             try {
-                currentLyrics =
-                    await getSyncedLyrics({
-                        trackName:
-                            playback.trackName,
-
-                        artistName:
-                            playback.artistName,
-
-                        albumName:
-                            playback.albumName,
-
-                        durationMs:
-                            playback.durationMs
-                    });
+                currentLyrics = await getSyncedLyrics({
+                    trackName: playback.trackName,
+                    artistName: playback.artistName,
+                    albumName: playback.albumName,
+                    durationMs: playback.durationMs
+                });
 
                 console.log(
                     `Loaded ${currentLyrics.length} synced lyric lines.`
                 );
             } catch (error) {
-                console.error(
-                    "Failed to load lyrics:",
-                    error
-                );
-
+                console.error("Failed to load lyrics:", error);
                 currentLyrics = [];
             }
         }
     } catch (error) {
-        console.error(
-            "Failed to sync Spotify playback:",
-            error
-        );
+        console.error("Failed to sync Spotify playback:", error);
     } finally {
         spotifySyncRunning = false;
     }
 }
 
-async function setWaitingPresence():
-Promise<void> {
-    if (
-        lastPresenceSignature ===
-        "waiting"
-    ) {
+// Polls the Spotify API for the current playback. If a new track is detected,
+// loads synced lyrics for that track. Uses a guard to avoid concurrent runs.
+
+async function setWaitingPresence(): Promise<void> {
+    if (lastPresenceSignature === "waiting") {
         return;
     }
 
@@ -211,8 +210,9 @@ Promise<void> {
     lastPresenceSignature = "waiting";
 }
 
-async function updatePresence():
-Promise<void> {
+// Sets a simple presence when there's no current playback.
+
+async function updatePresence(): Promise<void> {
     if (presenceUpdateRunning) {
         return;
     }
@@ -225,28 +225,17 @@ Promise<void> {
             return;
         }
 
-        const playback =
-            currentClock.playback;
+        const playback = currentClock.playback;
+        const progressMs = getEstimatedProgressMs();
+        const rawLyric = getLyricAt(currentLyrics, progressMs - LYRIC_OFFSET_MS);
 
-        const progressMs =
-            getEstimatedProgressMs();
+        const details = rawLyric
+            ? trimLyric(rawLyric)
+            : currentLyrics.length === 0
+                ? "No synced lyrics found"
+                : "♪ …";
 
-        const rawLyric =
-            getLyricAt(
-                currentLyrics,
-                progressMs -
-                LYRIC_OFFSET_MS
-            );
-
-        const details =
-            rawLyric
-                ? trimLyric(rawLyric)
-                : currentLyrics.length === 0
-                    ? "No synced lyrics found"
-                    : "♪ …";
-
-        const state =
-            `${playback.trackName} — ${playback.artistName}`;
+        const state = `${playback.trackName} — ${playback.artistName}`;
 
         const signature = [
             playback.trackId,
@@ -255,76 +244,48 @@ Promise<void> {
             state
         ].join("|");
 
-        if (
-            signature ===
-            lastPresenceSignature
-        ) {
+        if (signature === lastPresenceSignature) {
             return;
         }
 
-        const playbackStart =
-            Date.now() -
-            progressMs;
-
-        const playbackEnd =
-            playbackStart +
-            playback.durationMs;
+        const playbackStart = Date.now() - progressMs;
+        const playbackEnd = playbackStart + playback.durationMs;
 
         await client.user?.setActivity({
             type: 2,
             details,
             state,
-
-            largeImageKey:
-                playback.albumArtUrl ??
-                "lyricpresence",
-
+            largeImageKey: playback.albumArtUrl ?? "lyricpresence",
             /*
              * Intentionally no largeImageText.
              * Discord's listening layout was displaying it as an extra
              * album/artist line under the song.
              */
-
-            startTimestamp:
-                playback.isPlaying
-                    ? playbackStart
-                    : undefined,
-
-            endTimestamp:
-                playback.isPlaying
-                    ? playbackEnd
-                    : undefined,
-
+            startTimestamp: playback.isPlaying ? playbackStart : undefined,
+            endTimestamp: playback.isPlaying ? playbackEnd : undefined,
             instance: false,
-
             buttons: [
                 {
-                    label:
-                        "Open in Spotify",
-
-                    url:
-                        playback.spotifyUrl
+                    label: "Open in Spotify",
+                    url: playback.spotifyUrl
                 }
             ]
         });
 
-        lastPresenceSignature =
-            signature;
+        lastPresenceSignature = signature;
 
-        console.log(
-            `${playback.trackName} — ${playback.artistName}`
-        );
-
+        console.log(`${playback.trackName} — ${playback.artistName}`);
         console.log(details);
     } catch (error) {
-        console.error(
-            "Failed to update Discord presence:",
-            error
-        );
+        console.error("Failed to update Discord presence:", error);
     } finally {
         presenceUpdateRunning = false;
     }
 }
+
+// Updates Discord activity to show current song and the currently active lyric
+// line. Avoids unnecessary updates by comparing a signature of the important
+// presence fields (track, play state, details, state).
 
 client.on("ready", async () => {
     console.log(
