@@ -8,7 +8,7 @@ That's pretty much it.
 
 It somehow turned into an actual project.
 
-![LyricPresence Demo](https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExYW5qbHpta2VyNzJjamltcXluZWtuaGplbTk5dnh6eG9iZHF1YXFpcCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/bjPx18O9EDi9QSreSI/giphy.gif)
+![LyricPresence Demo](https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExbnpoOXJhdHN3cDVlajVncXBib2d3bnZtM2NpYW8xYXFvdGc2OGkzeCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/SZJ7gt9BUAkvNFvgjY/giphy.gif)
 
 ## What does this do?
 
