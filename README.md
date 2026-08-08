@@ -8,7 +8,7 @@ That's pretty much it.
 
 It somehow turned into an actual project.
 
-![LyricPresence Preview](PUT_YOUR_SCREENSHOT_HERE)
+![LyricPresence Demo](https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExdnEyM3RramRxaTBpd2l5NTN2M3A4Ym1uNTVkb3U1OHZ1Zmg3OW5qcSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/QwMnmotyAbFV9dbL4c/giphy.gif)
 
 ## What does this do?
 
