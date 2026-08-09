@@ -10,9 +10,11 @@ It somehow turned into an actual project.
 
 ![LyricPresence Demo](assets/demo.gif)
 
-## What does this do?
+---
 
-LyricPresence takes whatever song you're currently listening to on Spotify, finds synced lyrics for it using [LRCLIB](https://lrclib.net/), and displays the current lyric through Discord Rich Presence.
+# What does this do?
+
+LyricPresence takes whatever song you're currently listening to on Spotify, finds synchronized lyrics for it, figures out which lyric you're currently hearing, and displays it through Discord Rich Presence.
 
 Basically:
 
@@ -23,8 +25,15 @@ Current Song
    ↓
 LRCLIB
    ↓
-Synced Lyrics
-   ↓
+Found it?
+   ├── yes → Synced Lyrics
+   │
+   └── no
+        ↓
+      Lrcmux
+        ↓
+      Synced Lyrics
+        ↓
 LyricPresence
    ↓
 Discord Rich Presence
@@ -52,11 +61,75 @@ At least that's the idea.
 
 ---
 
+# How does it work?
+
+There are basically three parts to LyricPresence.
+
+### Spotify
+
+Spotify's Web API tells LyricPresence what you're currently listening to.
+
+That includes things like:
+
+```text
+song
+artist
+album
+album artwork
+song duration
+playback position
+playing/paused
+```
+
+LyricPresence periodically refreshes that information and estimates your playback position between Spotify requests.
+
+That means Spotify does **not** need to be contacted every 250 milliseconds just because the lyric changed.
+
+That would be stupid.
+
+And Spotify would probably beat my ass with a `429`.
+
+### Lyrics
+
+Once LyricPresence detects a new song, it checks **LRCLIB** first.
+
+If LRCLIB has synchronized lyrics:
+
+```text
+nice
+↓
+use those
+```
+
+If LRCLIB doesn't have them:
+
+```text
+LRCLIB
+↓
+nope
+↓
+Lrcmux
+```
+
+Lrcmux is a lyrics aggregation API that can search multiple providers.
+
+This gives LyricPresence significantly better coverage than relying on one lyric database.
+
+### Discord
+
+Once we have synchronized lyrics, LyricPresence compares their timestamps against your estimated Spotify playback position.
+
+The current line gets sent through Discord Rich Presence.
+
+Discord handles actually displaying the activity.
+
+---
+
 # ⚠️ READ THIS BEFORE INSTALLING
 
 There are a couple things you should know before spending ten minutes setting everything up.
 
-### You currently need Spotify Premium.
+## You currently need Spotify Premium.
 
 The current version of LyricPresence uses Spotify's Web API.
 
@@ -66,13 +139,21 @@ You'll also need to create your **own Spotify Developer application**.
 
 No, I cannot just give you mine.
 
-### You need Discord Desktop.
+## You need Discord Desktop.
 
-This uses Discord Rich Presence, so the program needs to connect to the Discord desktop client.
+LyricPresence uses Discord Rich Presence.
 
-The activity can still be **seen** from Discord mobile and browser, but LyricPresence itself runs on your computer.
+That means the program needs to connect to the Discord desktop client running on your computer.
 
-### Don't leave this running for absolutely no reason.
+Your activity can still be **seen** from:
+
+- Discord Desktop
+- Discord Browser
+- Discord Mobile
+
+but LyricPresence itself currently runs on your computer.
+
+## Don't leave this running for absolutely no reason.
 
 LyricPresence regularly checks Spotify for your current playback.
 
@@ -110,6 +191,15 @@ You'll need:
 Everything used by LyricPresence itself is free.
 
 Spotify Premium obviously is not.
+
+You do **not** need:
+
+- a Discord bot
+- a Discord bot token
+- a Spotify Client Secret
+- an LRCLIB API key
+- an Lrcmux API key
+- to pay for a lyrics API
 
 ---
 
@@ -159,11 +249,13 @@ Install it with:
 npm install -g pnpm
 ```
 
-Check it with:
+Then check:
 
 ```bash
 pnpm --version
 ```
+
+If that prints a version number, we're still alive.
 
 ---
 
@@ -191,7 +283,7 @@ Click:
 
 **New Application**
 
-Name it whatever you want your activity to be called.
+Name it whatever you want your activity/application to be called.
 
 For example:
 
@@ -209,11 +301,13 @@ Copy it.
 
 We'll need that in a second.
 
-### Rich Presence assets
+## Rich Presence assets
 
 You can also upload an image for LyricPresence through the Discord Developer Portal.
 
-This can be used as a fallback image when album artwork isn't available.
+LyricPresence normally attempts to use the current album artwork.
+
+The application image can act as a fallback when album artwork isn't available.
 
 ---
 
@@ -237,7 +331,7 @@ Client ID
 
 You do **not** need to put your Client Secret into LyricPresence.
 
-### Redirect URI
+## Redirect URI
 
 Inside your Spotify application's settings, add:
 
@@ -341,13 +435,149 @@ This stores your Spotify authorization locally so you don't have to log in every
 
 **Do not share that file either.**
 
-It's also ignored by Git.
+It's also supposed to stay ignored by Git.
 
 Now start playing something on Spotify.
 
 If everything worked, check your Discord profile.
 
 You should see LyricPresence.
+
+---
+
+# What should the terminal look like?
+
+When LRCLIB has the song, you'll see something roughly like:
+
+```text
+Loading lyrics for Song — Artist
+LRCLIB responded in 0.20s
+Lyrics provider: LRCLIB (65 lines)
+Loaded 65 synced lyric lines.
+```
+
+If LRCLIB doesn't have it:
+
+```text
+Loading lyrics for Song — Artist
+LRCLIB responded in 0.28s
+LRCLIB: no synced lyrics found.
+Trying Lrcmux...
+Lrcmux: searching for "Song" by Artist...
+Lrcmux responded in 1.24s
+Lyrics provider: Lrcmux (73 lines)
+Loaded 73 synced lyric lines.
+```
+
+If neither one has synchronized lyrics:
+
+```text
+LRCLIB: no synced lyrics found.
+Trying Lrcmux...
+Lrcmux: no synced lyrics found.
+No synced lyrics found.
+```
+
+Then you're cooked.
+
+---
+
+# Where do the lyrics come from?
+
+LyricPresence currently uses two stages.
+
+## 1. LRCLIB
+
+[LRCLIB](https://lrclib.net/) is always checked first.
+
+They're basically the first:
+
+```text
+hey you got this song?
+```
+
+If LRCLIB returns synchronized lyrics, LyricPresence uses them immediately.
+
+## 2. Lrcmux
+
+If LRCLIB doesn't have synchronized lyrics, LyricPresence falls back to:
+
+[Lrcmux](https://lrcmux.dev/)
+
+Lrcmux is a lyrics aggregation API.
+
+At the time of writing, Lrcmux can query providers including:
+
+- Genius
+- KuGou
+- Musixmatch
+- NetEase
+- YouTube Music
+
+Those providers have different catalogs and different synchronization capabilities.
+
+LyricPresence only cares about getting usable synchronized lyrics back.
+
+You don't need to configure any of those providers yourself.
+
+You also don't need an Lrcmux API key.
+
+The whole process is basically:
+
+```text
+new song
+   ↓
+LRCLIB
+   ↓
+got synced lyrics?
+   ├── yes → done
+   │
+   └── no
+        ↓
+      Lrcmux
+        ↓
+      got synced lyrics?
+        ├── yes → done
+        │
+        └── no → damn
+```
+
+---
+
+# How accurate are the lyrics?
+
+idk.
+
+No seriously, I can't give you an exact percentage.
+
+LyricPresence doesn't write or manually synchronize any of the lyrics itself.
+
+It gets synchronized lyric data from LRCLIB and, when necessary, Lrcmux.
+
+Because Lrcmux itself can aggregate several providers, two songs displayed by LyricPresence may not even ultimately come from the same lyric database.
+
+Most songs I've tried work pretty well.
+
+Some lyrics might be:
+
+- slightly early
+- slightly late
+- incorrectly synced
+- missing a line
+- censored depending on the source
+- completely unavailable
+
+There are also different levels of synchronization.
+
+Some providers have line-by-line timestamps.
+
+Some can have word-level timestamps.
+
+Some songs only have plain text lyrics.
+
+LyricPresence needs timestamps to know what you're currently hearing.
+
+If the timing is consistently slightly off for you, that's what `LYRIC_OFFSET_MS` is for.
 
 ---
 
@@ -369,7 +599,7 @@ For example:
 LYRIC_OFFSET_MS=500
 ```
 
-delays the lyrics by 500 milliseconds.
+delays the lyric by 500 milliseconds.
 
 And:
 
@@ -377,9 +607,11 @@ And:
 LYRIC_OFFSET_MS=-500
 ```
 
-makes them appear 500 milliseconds earlier.
+makes it appear 500 milliseconds earlier.
 
-Different songs on LRCLIB can have slightly different synchronization, so there isn't one magical value that will make every song perfect.
+There isn't one magical value that'll make every song perfect.
+
+Different songs can have different synchronization quality depending on where the lyrics came from.
 
 ---
 
@@ -395,39 +627,7 @@ MAX_LYRIC_LENGTH=92
 
 to whatever you prefer.
 
-If a lyric exceeds the limit, LyricPresence trims it instead of dumping an entire paragraph into your activity.
-
----
-
-# How accurate are the lyrics?
-
-idk.
-
-No seriously, I can't give you an exact percentage.
-
-LyricPresence currently gets synchronized lyrics from [LRCLIB](https://lrclib.net/).
-
-LRCLIB contains lyrics contributed through its service and its own sources, so quality depends on what's available for that specific song.
-
-Most songs I've tried work pretty well.
-
-Some lyrics might be:
-
-- slightly early
-- slightly late
-- incorrectly synced
-- missing a line
-- completely unavailable
-
-There are also songs where lyrics might appear in something like Spicetify but **not** in LyricPresence.
-
-That doesn't necessarily mean LyricPresence broke.
-
-Spicetify can use other lyric providers. LyricPresence currently uses LRCLIB.
-
-If another provider has the song and LRCLIB doesn't, I can't magically summon the lyrics out of my ass.
-
-Not yet, anyway.
+If a lyric exceeds the limit, LyricPresence tries to trim it at a reasonable word boundary instead of dumping an entire paragraph into your activity.
 
 ---
 
@@ -460,7 +660,17 @@ I am not putting my personal developer credentials in a public GitHub repository
 
 ---
 
-## Do the API keys cost money?
+## Do I need a Spotify Client Secret?
+
+No.
+
+The current authorization setup does not require you to put your Spotify Client Secret into LyricPresence.
+
+Don't.
+
+---
+
+## Do the APIs cost money?
 
 No.
 
@@ -468,11 +678,43 @@ Creating the Discord application doesn't cost anything.
 
 Creating the Spotify developer application itself doesn't have an API fee, although Spotify currently requires a Premium account for the Development Mode setup LyricPresence uses.
 
-LRCLIB is also free.
+LRCLIB is free.
+
+Lrcmux is also free to use under its current public API limits.
 
 ---
 
-## Why am I getting `429 QUOTA_EXCEEDED`?
+## Does Lrcmux have a rate limit?
+
+Yeah, but normal LyricPresence usage should be nowhere near it.
+
+Lrcmux currently documents a limit of:
+
+```text
+60 requests per minute
+```
+
+Cache hits are free and don't count against that limit.
+
+LyricPresence also doesn't constantly spam Lrcmux.
+
+It only needs Lrcmux when:
+
+```text
+new song
+↓
+LRCLIB couldn't find synced lyrics
+↓
+try Lrcmux
+```
+
+If Lrcmux responds with a `429`, LyricPresence checks its `Retry-After` response.
+
+Unless you're somehow changing songs more than once every second, I wouldn't spend much time worrying about this one.
+
+---
+
+## Why am I getting `429 QUOTA_EXCEEDED` from Spotify?
 
 You made too many Spotify API requests.
 
@@ -528,7 +770,7 @@ for six hours.
 
 ---
 
-## Can I make LyricPresence update Spotify more frequently?
+## Can I make LyricPresence check Spotify more frequently?
 
 Technically.
 
@@ -538,9 +780,11 @@ Probably not.
 
 I learned this one myself.
 
-Lowering the Spotify polling interval makes LyricPresence check Spotify more frequently, but it also burns through your API quota considerably faster.
+Lowering the Spotify polling interval makes LyricPresence detect skips, seeks, and other playback changes faster.
 
-Setting it to something stupid like one second is a fantastic way to discover what:
+It also burns through your Spotify API quota considerably faster.
+
+Setting it to something stupidly aggressive is a fantastic way to discover what:
 
 ```text
 QUOTA_EXCEEDED
@@ -548,7 +792,57 @@ QUOTA_EXCEEDED
 
 means.
 
-The lyrics themselves do not require Spotify to be contacted for every lyric update.
+The lyrics themselves do **not** require Spotify to be contacted every time the displayed line changes.
+
+LyricPresence estimates your current playback position locally between Spotify checks.
+
+---
+
+## Why does a song have lyrics somewhere else but not here?
+
+Different services use different databases.
+
+LyricPresence tries to make this less annoying by using:
+
+```text
+LRCLIB
+↓
+Lrcmux
+```
+
+and Lrcmux itself aggregates multiple providers.
+
+That gives LyricPresence considerably better coverage than it had when LRCLIB was the only source.
+
+It still won't find literally everything.
+
+A song can:
+
+- have no synchronized lyrics
+- only have plain text lyrics
+- have different metadata between services
+- be an obscure remix
+- have a slightly different title
+- have a different featured-artist format
+- simply fail to match
+
+So yes, Spotify or another application can occasionally have lyrics while LyricPresence doesn't.
+
+I have unfortunately not yet achieved omniscience.
+
+---
+
+## Why does Spicetify have lyrics but LyricPresence doesn't?
+
+Same reason.
+
+Different lyric providers.
+
+Spicetify extensions can use completely different sources and matching logic.
+
+LyricPresence now has a fallback through Lrcmux, so this should happen less often than it used to.
+
+But there's still no guarantee that two unrelated applications will find the exact same lyrics.
 
 ---
 
@@ -594,8 +888,6 @@ Right now the terminal **is running LyricPresence**.
 
 Close it and the Node process dies.
 
-If you accidentally pause the terminal and everything suddenly stops updating, that's also not particularly helpful.
-
 Windows Terminal is recommended over ancient Command Prompt.
 
 Eventually I want LyricPresence to run as a proper system tray application so you don't need a terminal sitting there all day.
@@ -618,31 +910,7 @@ LyricPresence does store:
 
 for Spotify authorization.
 
----
-
-## Where do the lyrics come from?
-
-[LRCLIB](https://lrclib.net/)
-
-They're the ones doing the hard part.
-
-LyricPresence basically asks:
-
-```text
-hey you got this song?
-```
-
-and then uses the synchronized timestamps they provide.
-
----
-
-## Why does a song have lyrics somewhere else but not here?
-
-Different services use different lyric providers.
-
-A song existing on Musixmatch, Spotify, Spicetify, or somewhere else does not guarantee that LRCLIB has synchronized lyrics for it.
-
-Multiple lyric providers are something I'd like to support eventually.
+That's different.
 
 ---
 
@@ -652,21 +920,23 @@ Maybe.
 
 I wouldn't depend on it.
 
-Local files can have different or incomplete metadata, which makes matching them against LRCLIB much harder.
+Local files can have different or incomplete metadata, which makes matching them against online lyric databases much harder.
 
-If the title and artist happen to match something LRCLIB recognizes, you might get lucky.
+If the title and artist happen to match something the providers recognize, you might get lucky.
 
 ---
 
 ## Does this work with YouTube Music?
 
-No.
+Not as the playback source.
 
 At least not this version.
 
-LyricPresence currently gets playback information through Spotify.
+LyricPresence currently gets **playback information** through Spotify.
 
-However, I'm experimenting with reading playback directly through Windows instead, which could eventually make support for other media players possible.
+Lrcmux may use YouTube Music as one of its lyric sources, but that's completely separate from LyricPresence actually monitoring YouTube Music playback.
+
+I am experimenting with reading playback directly through Windows instead, which could eventually make support for other media players possible.
 
 ---
 
@@ -693,6 +963,18 @@ what the mf is currently saying
 
 ---
 
+## Why not read Discord's existing Spotify activity?
+
+That sounds easier than it actually is.
+
+Discord already knows what Spotify is playing, but its Rich Presence/activity system isn't designed as a nice public playback API for another local application to consume however it wants.
+
+Spotify's API gives LyricPresence structured playback information directly.
+
+I'm also experimenting with Windows media sessions through GSMTC as another possible solution.
+
+---
+
 ## Why not use a Discord custom status?
 
 Funny story.
@@ -701,7 +983,7 @@ That was basically the original idea.
 
 Constantly changing a Discord custom status to every lyric turns out to be an excellent way to get rate limited.
 
-Also, your friends probably don't need 900 presence/status changes because you listened to one BabyTron album.
+Also, your friends probably don't need 900 status changes because you listened to one BabyTron album.
 
 Rich Presence ended up being much better suited for this.
 
@@ -721,7 +1003,7 @@ Use whichever one you like.
 
 ---
 
-## Is LyricPresence safe?
+# Is LyricPresence safe?
 
 The entire project is open source, so you can read exactly what it's doing.
 
@@ -732,6 +1014,7 @@ LyricPresence does **not** need:
 - a Discord bot token
 - access to your DMs
 - access to your Discord servers
+- your Spotify Client Secret
 
 Discord is handled through Rich Presence.
 
@@ -804,17 +1087,91 @@ Make sure:
 - you completed authorization
 - `.spotify-token.json` exists after authorization
 
-If you're getting a `429`, see the quota section above.
+If you're getting a `429`, see the Spotify quota section above.
 
 ---
 
 ## Lyrics aren't showing
 
-First check whether LRCLIB actually has synchronized lyrics for that song:
+Watch the terminal when the song changes.
+
+You should see LyricPresence try LRCLIB.
+
+If that fails, it should automatically try Lrcmux.
+
+Something like:
+
+```text
+LRCLIB: no synced lyrics found.
+Trying Lrcmux...
+```
+
+If you eventually see:
+
+```text
+Lrcmux: no synced lyrics found.
+No synced lyrics found.
+```
+
+neither source returned usable synchronized lyrics for that track.
+
+You can also check:
 
 https://lrclib.net/
 
-If it doesn't, LyricPresence doesn't have anything to display.
+and:
+
+https://lrcmux.dev/
+
+---
+
+## Lrcmux is taking a few seconds
+
+That's normal.
+
+LRCLIB is checked first.
+
+Lrcmux only gets involved when LRCLIB misses.
+
+Lrcmux is an aggregator, so an uncached request may require it to search other lyric providers before returning something.
+
+Cached responses can be considerably faster.
+
+---
+
+## The lyrics are early or late
+
+Try changing:
+
+```env
+LYRIC_OFFSET_MS=0
+```
+
+Positive values delay the lyric.
+
+Negative values make it appear earlier.
+
+For example:
+
+```env
+LYRIC_OFFSET_MS=300
+```
+
+or:
+
+```env
+LYRIC_OFFSET_MS=-300
+```
+
+---
+
+## Album artwork isn't showing
+
+LyricPresence attempts to use the album artwork URL returned with the current Spotify track.
+
+If Discord can't use the image, your Discord application asset can act as the fallback.
+
+Make sure you've configured an appropriate Rich Presence asset in the Discord Developer Portal if you want one.
 
 ---
 
@@ -838,6 +1195,84 @@ Ctrl + Q
 
 ---
 
+# Development
+
+If you want to mess with the source:
+
+```bash
+pnpm dev
+```
+
+This runs the TypeScript source directly using `tsx`.
+
+## Build
+
+To compile the TypeScript:
+
+```bash
+pnpm build
+```
+
+This creates:
+
+```text
+dist/
+```
+
+with compiled JavaScript files such as:
+
+```text
+dist/
+├── index.js
+├── lyrics.js
+└── spotify.js
+```
+
+You normally don't need to manually edit anything inside `dist/`.
+
+It's generated from `src/`.
+
+## Run the compiled build
+
+After building:
+
+```bash
+pnpm start
+```
+
+runs:
+
+```text
+dist/index.js
+```
+
+So:
+
+```text
+pnpm dev
+```
+
+is convenient while developing.
+
+```text
+pnpm build
+pnpm start
+```
+
+runs the compiled version.
+
+The project currently uses:
+
+- TypeScript
+- Node.js
+- pnpm
+- `@xhayper/discord-rpc`
+- Spotify Web API
+- LRCLIB
+- Lrcmux
+
+---
+
 # Current limitations
 
 LyricPresence is still a pretty early project.
@@ -848,8 +1283,8 @@ Currently:
 - Spotify Premium is required
 - Spotify Developer setup is required
 - Discord Developer setup is required
-- LRCLIB is the only lyric provider
-- API quotas can happen
+- lyrics depend on LRCLIB/Lrcmux availability and matching
+- Spotify API quotas can happen
 - mobile/browser activity updates may lag behind desktop
 - the terminal has to stay running
 - there is no GUI yet
@@ -864,7 +1299,17 @@ It works though.
 
 I have a bunch of stuff I'd like to eventually add.
 
-### System tray app
+None of this is a promise.
+
+It's basically the pile of:
+
+```text
+wouldn't it be cool if...
+```
+
+that got me into this situation in the first place.
+
+## System tray app
 
 This is probably the biggest one.
 
@@ -887,13 +1332,17 @@ every time, I'd rather have a tiny tray icon where you can:
 
 Way cleaner.
 
-### GSMTC playback
+The actual GUI could stay tiny because there really isn't much the user needs to stare at.
 
-I'm currently experimenting with Windows' **Global System Media Transport Controls**.
+---
+
+## GSMTC playback
+
+I'm experimenting with Windows' **Global System Media Transport Controls**.
 
 The idea is to read Spotify's playback information directly from Windows instead of constantly asking Spotify's Web API.
 
-The proof of concept can already read:
+The proof of concept can already read things like:
 
 ```text
 Title
@@ -906,25 +1355,57 @@ Duration
 
 directly from Spotify's Windows media session.
 
-If this works well enough for the actual project, it could dramatically reduce Spotify API usage and potentially remove some of the current setup requirements.
+If this works well enough for the actual project, it could dramatically reduce Spotify API usage.
 
-### More lyric providers
+It could also potentially make support for other media players possible later.
 
-LRCLIB is great, but it doesn't have everything.
+For now, though:
 
-Eventually I'd like fallback providers so:
+**Spotify Web API remains the actual playback backend.**
+
+---
+
+## Better lyric matching
+
+We already went from:
 
 ```text
-LRCLIB doesn't have it
+LRCLIB
 ↓
-try another source
-↓
-maybe another
+give up
 ```
 
-instead of immediately giving up.
+to:
 
-### Better installation
+```text
+LRCLIB
+↓
+Lrcmux
+```
+
+which has massively improved coverage.
+
+I'd still like to improve things like:
+
+- weird song titles
+- featured artists
+- remixes
+- alternate versions
+- metadata normalization
+- provider selection
+- caching
+
+There is always going to be some mf with:
+
+```text
+song_name_FINAL_v2_remix_(slowed+reverb)_prod.whatever
+```
+
+that ruins everything.
+
+---
+
+## Better installation
 
 Eventually:
 
@@ -940,37 +1421,6 @@ We'll get there.
 
 ---
 
-# Development
-
-If you want to mess with the source:
-
-```bash
-pnpm dev
-```
-
-Build TypeScript:
-
-```bash
-pnpm build
-```
-
-Run the compiled build:
-
-```bash
-pnpm start
-```
-
-The project currently uses:
-
-- TypeScript
-- Node.js
-- pnpm
-- `@xhayper/discord-rpc`
-- Spotify Web API
-- LRCLIB
-
----
-
 # Contributing
 
 If you find a bug, feel free to open an issue.
@@ -981,9 +1431,10 @@ This is my first actual GitHub project of this scale, so there's probably some w
 
 If something breaks:
 
-tell me what happened,
-tell me what you were doing,
-and if possible include the error.
+- tell me what happened
+- tell me what you were doing
+- include the terminal output if possible
+- include steps to reproduce it if you can
 
 Please don't just open:
 
@@ -997,27 +1448,49 @@ I cannot debug spiritual disturbances.
 
 # Credits
 
-### LRCLIB
+## LRCLIB
 
-Provides the synchronized lyrics.
+Primary synchronized lyrics provider.
 
 https://lrclib.net/
 
 https://github.com/tranxuanthang/lrclib
 
-### Spotify for Developers
+Huge thanks to the people maintaining it and contributing synchronized lyrics.
+
+---
+
+## Lrcmux
+
+Fallback lyrics aggregation API.
+
+When LRCLIB doesn't have synchronized lyrics for a track, LyricPresence tries Lrcmux.
+
+https://lrcmux.dev/
+
+https://api.lrcmux.dev/
+
+Lrcmux can aggregate lyrics from multiple providers, which is why LyricPresence's coverage is considerably better with it.
+
+---
+
+## Spotify for Developers
 
 Current playback and Spotify metadata.
 
 https://developer.spotify.com/
 
-### Discord Developer Platform
+---
+
+## Discord Developer Platform
 
 Rich Presence.
 
 https://discord.com/developers/docs/
 
-### @xhayper/discord-rpc
+---
+
+## @xhayper/discord-rpc
 
 Discord RPC library used by LyricPresence.
 
@@ -1039,7 +1512,33 @@ Because I thought it would look cool.
 
 That's genuinely it.
 
-I wanted Discord to show the lyric I was currently listening to, tried doing it through custom statuses, got into a fistfight with rate limits, moved over to Rich Presence, and somehow ended up learning Spotify OAuth, Discord RPC, synchronized lyric parsing, TypeScript, and Windows media APIs along the way.
+I wanted Discord to show the lyric I was currently listening to.
+
+Originally I tried doing it through custom statuses.
+
+That turned into:
+
+```text
+rate limits
+↓
+pain
+↓
+Discord RPC
+↓
+Spotify OAuth
+↓
+synchronized lyric parsing
+↓
+LRCLIB
+↓
+Lrcmux
+↓
+Windows media APIs
+↓
+why is this an actual project now
+```
+
+And somehow we're here.
 
 So uh.
 
